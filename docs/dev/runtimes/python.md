@@ -136,7 +136,7 @@ services:
         limits:
           memory: "{{memory_limit}}"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:{{container_port}}/health || wget -qO- http://localhost:{{container_port}}/ || exit 1"]
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection((socket.gethostname(), {{container_port}}), 5)"]
       interval: 30s
       timeout: 10s
       retries: 3

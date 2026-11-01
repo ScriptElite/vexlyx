@@ -151,6 +151,17 @@ Returns real-time container status from Docker inspect.
   bound to `127.0.0.1` instead of `$HOST` keeps reporting `running` while its domain returns
   502 (#202).
 
+  What the probe asks comes from the compose template, and every template now asks the
+  question Traefik asks: *is something answering on the container's own routable address*.
+  That address is what Docker writes next to the container's name in `/etc/hosts`, so the
+  probes resolve `os.hostname()` / `gethostname()` / `$HOSTNAME` rather than `127.0.0.1` —
+  loopback stays reachable when an app binds only loopback, which is exactly how a 502 site
+  used to pass its own healthcheck. They stop at the TCP layer (`net.connect`,
+  `socket.create_connection`, `fsockopen`, `nc -z`) because a project has no guaranteed
+  index route, and each one uses a tool its image is certain to ship: the Nixpacks images
+  carry no `wget`, and busybox resolves `localhost` to `::1` first, so an HTTP-level probe
+  could call a correctly bound app unhealthy (#202).
+
 ### `GET /api/projects/:id/logs?tail=100`
 Fetches runtime logs from the container.
 - **Response**:
