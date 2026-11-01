@@ -176,9 +176,14 @@ still gets a clean 404 for a missing path, via the `.php` location's own
 `client_max_body_size 512m` — higher than WordPress's 64m, since migration
 archives run larger.
 
-The `web` healthcheck (`wget ... ; test $$? -ne 4`) treats a reachable-but-404
-response as healthy — there's no guaranteed index page for an arbitrary PHP
-project, so only an actual connection failure (exit 4) counts as unhealthy.
+The `web` healthcheck is `nc -z -w 3 $${HOSTNAME} 80`: a TCP probe of the address
+Traefik itself connects to, not of `127.0.0.1`. It deliberately does not read an
+HTTP response, because an arbitrary PHP project has no guaranteed index page —
+nginx answering 404, or 502 because `app` is wedged, still means the container is
+reachable and the site's own content is the thing to debug. The form it replaced,
+`wget ... ; test $$? -ne 4`, could never report a failure at all: nginx:alpine's
+busybox wget exits 1 on a refused connection, and 4 — GNU wget's network-failure
+code — was the only value the guard treated as dead (#202).
 
 ## Four bugs found live, testing a real Duplicator migration
 

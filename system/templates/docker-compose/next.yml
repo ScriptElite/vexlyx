@@ -22,7 +22,7 @@ services:
         limits:
           memory: "{{memory_limit}}"
     healthcheck:
-      test: ["CMD", "node", "-e", "const socket=require('net').connect({{container_port}},'127.0.0.1',()=>{socket.end();process.exit(0)});socket.on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "const socket=require('net').connect({{container_port}},require('os').hostname(),()=>{socket.end();process.exit(0)});socket.on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
