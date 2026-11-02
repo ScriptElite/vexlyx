@@ -4,6 +4,8 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+## [0.4.5] - 2026-11-02
+
 ### Fixed
 
 - A container that fails its own healthcheck is no longer reported as a healthy deployment. The panel read only Docker's `.State.Status`, and that says *the process is up* — an app that binds `127.0.0.1` instead of the address Traefik routes to keeps its process up, keeps its in-container probe passing, and answers nothing, so the project page said "Running" while the domain returned 502. `docker inspect` now reads `.State.Health` alongside the status in the same call, and the project page shows **Unhealthy** with the reason instead of **Running**, or **Waiting for healthcheck** while the image is still inside its start period. Images that declare no healthcheck at all report nothing rather than a false pass (#202).
