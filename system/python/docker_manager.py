@@ -36,10 +36,12 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 
@@ -636,6 +638,112 @@ def app_container_id(compose_dir: str, docker_bin: str, project_type: str = "NOD
 
 
 # ---------------------------------------------------------------------------
+# Post-deploy routable reachability check (#202)
+# ---------------------------------------------------------------------------
+
+ROUTABLE_PROBE_ATTEMPTS = 3
+ROUTABLE_PROBE_TIMEOUT_SECONDS = 3.0
+ROUTABLE_PROBE_RETRY_DELAY_SECONDS = 1.5
+
+
+def container_routable_ip(docker_bin: str, container_id: str) -> str | None:
+    """The address Traefik connects to: this container's IP on APPS_NETWORK."""
+    if not container_id:
+        return None
+    result = run_bounded(
+        QUICK_TIMEOUT,
+        [
+            docker_bin,
+            "inspect",
+            "--format",
+            "{{json .NetworkSettings.Networks}}",
+            container_id,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        attachment = json.loads(result.stdout or "{}").get(APPS_NETWORK) or {}
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return (attachment.get("IPAddress") or "").strip() or None
+
+
+def container_declares_healthcheck(docker_bin: str, container_id: str) -> bool:
+    """True when the image ships a HEALTHCHECK, in which case Docker is already
+    grading the container and the panel's health badge (#202) reports the verdict."""
+    if not container_id:
+        return False
+    result = run_bounded(
+        QUICK_TIMEOUT,
+        [
+            docker_bin,
+            "inspect",
+            "--format",
+            "{{if .Config.Healthcheck}}1{{else}}0{{end}}",
+            container_id,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return result.returncode == 0 and result.stdout.strip() == "1"
+
+
+def port_is_listening(address: str, port: int, timeout: float) -> bool:
+    """One TCP connect attempt. Nothing inside the image is required, which is
+    what makes this usable on a Dockerfile project's arbitrary base image."""
+    try:
+        with socket.create_connection((address, port), timeout):
+            return True
+    except OSError:
+        return False
+
+
+def probe_routable_listen(
+    docker_bin: str, container_id: str, port: int
+) -> tuple[str | None, bool | None]:
+    """
+    Ask the same question the router asks, from the host.
+
+    A loopback-only bind answers `127.0.0.1` and nothing on this address, which
+    is the 502-while-the-container-runs case #202 is about. Retries cover an app
+    that is still binding the port when the container first comes up.
+
+    Returns (address, reachable), or (None, None) when the container has no
+    APPS_NETWORK address to probe.
+    """
+    address = container_routable_ip(docker_bin, container_id)
+    if not address:
+        return None, None
+    for attempt in range(ROUTABLE_PROBE_ATTEMPTS):
+        if port_is_listening(address, port, ROUTABLE_PROBE_TIMEOUT_SECONDS):
+            return address, True
+        if attempt + 1 < ROUTABLE_PROBE_ATTEMPTS:
+            time.sleep(ROUTABLE_PROBE_RETRY_DELAY_SECONDS)
+    return address, False
+
+
+def routable_check_log(
+    address: str | None, reachable: bool | None, port: int, hostname: str
+) -> str:
+    if address is None:
+        return f"Routable check skipped: container is not attached to {APPS_NETWORK}"
+    if reachable:
+        return f"Routable check {address}:{port} answered — Traefik can reach this container"
+    return (
+        f"WARNING: nothing answers on {address}:{port}, the address Traefik connects to, so "
+        f"{hostname} returns 502 even though the container is running. The app is most likely "
+        "bound to 127.0.0.1; bind it to $HOSTNAME or 0.0.0.0 instead."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
@@ -781,6 +889,13 @@ def cmd_deploy(payload: dict) -> None:
     # Retrieve the container ID
     container_id = get_container_id(str(compose_dir), docker_bin, project_type) or ""
     log_line(f"[vexlyx] Container started: id={container_id[:12] if container_id else 'unknown'}")
+
+    # An image that declares no HEALTHCHECK leaves Docker with nothing to grade, so
+    # a container that binds only 127.0.0.1 deploys as a silent 502. Probe the
+    # address the router uses instead, and say so in the log the user reads (#202).
+    if container_id and not container_declares_healthcheck(docker_bin, container_id):
+        address, reachable = probe_routable_listen(docker_bin, container_id, container_port)
+        log_line(f"[vexlyx] {routable_check_log(address, reachable, container_port, hostname)}")
 
     respond({
         "done": True,
