@@ -4,6 +4,14 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+### Fixed
+
+- A deploy whose app binds only `127.0.0.1` now says so in the build log instead of finishing silent. For an image that declares no `HEALTHCHECK`, Docker has nothing to grade, so the container came up *running*, the deployment reported success, and the domain returned 502 — the app was answering loopback while the address Traefik connects to answered nothing. After the container starts, the deployer now opens a TCP connection to the container's own `vexlyx-apps` address on the port its router upstreams to, retries three times, and logs either `Routable check <ip>:<port> answered — Traefik can reach this container` or a warning naming the port, the hostname, and the fix (bind to `$HOSTNAME` or `0.0.0.0`). The check is informational: it can not fail a deploy, and images that do declare a healthcheck are skipped so their own probe stays the single verdict (#202).
+
+### Upgrade notes
+
+- Re-run the installer to update the deploy scripts. No schema change and no API change — the verdict is one line in the existing build log. Projects on images that declare a `HEALTHCHECK` deploy exactly as before; the rest gain a few seconds of post-startup probing.
+
 ## [0.4.5] - 2026-11-02
 
 ### Fixed

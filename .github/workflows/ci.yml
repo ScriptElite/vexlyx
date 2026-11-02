@@ -90,6 +90,9 @@ jobs:
       - run: python3 -m unittest discover -s tests -p test_php_docroot_ownership.py
       - run: python3 -m unittest discover -s tests -p test_installer_panel_recreate.py
       - run: python3 -m unittest discover -s tests -p test_network_isolation.py
+      # the post-deploy probe reaches the container's bridge address, but the
+      # tests only bind a local socket, so they need no docker daemon.
+      - run: python3 -m unittest discover -s tests -p test_post_deploy_routable_probe.py
 
   build:
     runs-on: ubuntu-latest

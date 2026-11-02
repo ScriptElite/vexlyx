@@ -51,6 +51,7 @@ API (apps/api/src/modules/deploy/)
      - Writes `docker-compose.yml` in `{PROJECTS_DIR}/{projectId}/deploy/`.
      - Executes `docker compose up -d --force-recreate --pull never`.
      - Resolves container ID and verifies container startup.
+     - If the image declares no `HEALTHCHECK`, connects from the host to the container's `vexlyx-apps` address on the port the Traefik router upstreams to, and logs the answer — `Routable check <ip>:<port> answered`, or a `WARNING` naming that address and the bind fix (#202). It needs nothing inside the image, so it works on any base image, and it never fails the deploy: an app bound to `127.0.0.1` keeps its process up and answers nothing on the routable address, which is exactly the 502-while-"Running" case. Images that do declare a healthcheck are left to Docker's own verdict, which `GET /api/projects/:id/container/status` already reports.
    - Updates `Project` record in PostgreSQL (`containerId`, `containerStatus`, `internalPort`, `deployedDomain`, `deployedAt`, `status = ACTIVE`).
    - Marks `Deployment` record as `RUNNING`.
 
