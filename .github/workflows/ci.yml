@@ -83,6 +83,7 @@ jobs:
       - run: pip3 install cryptography
       - run: python3 -m unittest discover -s tests -p test_dkim_first_check.py
       - run: python3 -m unittest discover -s tests -p test_installer_nixpacks.py
+      - run: python3 -m unittest discover -s tests -p test_dockerfile_build_nixpacks_absent.py
       - run: python3 -m unittest discover -s tests -p test_nginx_conf_refresh.py
       - run: python3 -m unittest discover -s tests -p test_nginx_served_paths.py
       - run: python3 -m unittest discover -s tests -p test_installer_traefik_config.py
