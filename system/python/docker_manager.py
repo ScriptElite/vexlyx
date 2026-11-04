@@ -37,6 +37,7 @@ import re
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -646,31 +647,28 @@ ROUTABLE_PROBE_TIMEOUT_SECONDS = 3.0
 ROUTABLE_PROBE_RETRY_DELAY_SECONDS = 1.5
 
 
-def container_routable_ip(docker_bin: str, container_id: str) -> str | None:
-    """The address Traefik connects to: this container's IP on APPS_NETWORK."""
-    if not container_id:
-        return None
-    result = run_bounded(
-        QUICK_TIMEOUT,
-        [
-            docker_bin,
-            "inspect",
-            "--format",
-            "{{json .NetworkSettings.Networks}}",
-            container_id,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if result.returncode != 0:
-        return None
+def host_gateway_address(route_file: str = "/proc/net/route") -> str | None:
+    """
+    The host's address on this container's bridge, where a published port answers.
+
+    The probe has to run from somewhere with a route to the project container, and
+    this script is not: it runs inside the API container, which is deliberately kept
+    off APPS_NETWORK so panel services cannot reach customer workloads. Sockets from
+    here to a project's APPS_NETWORK address are dropped between the bridges.
+    """
     try:
-        attachment = json.loads(result.stdout or "{}").get(APPS_NETWORK) or {}
-    except (json.JSONDecodeError, AttributeError):
+        lines = Path(route_file).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
         return None
-    return (attachment.get("IPAddress") or "").strip() or None
+    for fields in (line.split() for line in lines[1:]):
+        if len(fields) < 3 or fields[1] != "00000000" or fields[2] == "00000000":
+            continue
+        try:
+            # /proc/net/route writes every address as little-endian hex.
+            return socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+        except (OSError, ValueError):
+            return None
+    return None
 
 
 def container_declares_healthcheck(docker_bin: str, container_id: str) -> bool:
@@ -705,24 +703,24 @@ def port_is_listening(address: str, port: int, timeout: float) -> bool:
         return False
 
 
-def probe_routable_listen(
-    docker_bin: str, container_id: str, port: int
-) -> tuple[str | None, bool | None]:
+def probe_published_port(host_port: int) -> tuple[str | None, bool | None]:
     """
-    Ask the same question the router asks, from the host.
+    Ask the app the question the router asks, from a namespace that can ask it.
 
-    A loopback-only bind answers `127.0.0.1` and nothing on this address, which
-    is the 502-while-the-container-runs case #202 is about. Retries cover an app
-    that is still binding the port when the container first comes up.
+    The kernel forwards the container's published port to its routable address, so a
+    loopback-only bind refuses the connection while a correct one answers -- the exact
+    distinction #202 was filed about. Retries cover an app still binding its port when
+    the container first comes up.
 
-    Returns (address, reachable), or (None, None) when the container has no
-    APPS_NETWORK address to probe.
+    Returns (gateway, answered), or (None, None) when there is nothing to probe.
     """
-    address = container_routable_ip(docker_bin, container_id)
+    if not host_port:
+        return None, None
+    address = host_gateway_address()
     if not address:
         return None, None
     for attempt in range(ROUTABLE_PROBE_ATTEMPTS):
-        if port_is_listening(address, port, ROUTABLE_PROBE_TIMEOUT_SECONDS):
+        if port_is_listening(address, host_port, ROUTABLE_PROBE_TIMEOUT_SECONDS):
             return address, True
         if attempt + 1 < ROUTABLE_PROBE_ATTEMPTS:
             time.sleep(ROUTABLE_PROBE_RETRY_DELAY_SECONDS)
@@ -730,16 +728,20 @@ def probe_routable_listen(
 
 
 def routable_check_log(
-    address: str | None, reachable: bool | None, port: int, hostname: str
+    address: str | None, reachable: bool | None, host_port: int, hostname: str
 ) -> str:
     if address is None:
-        return f"Routable check skipped: container is not attached to {APPS_NETWORK}"
+        return "Routable check skipped: no host gateway to probe through from this container"
     if reachable:
-        return f"Routable check {address}:{port} answered — Traefik can reach this container"
+        return (
+            f"Routable check {address}:{host_port} answered — this container accepts "
+            "connections from outside its own loopback"
+        )
     return (
-        f"WARNING: nothing answers on {address}:{port}, the address Traefik connects to, so "
-        f"{hostname} returns 502 even though the container is running. The app is most likely "
-        "bound to 127.0.0.1; bind it to $HOSTNAME or 0.0.0.0 instead."
+        f"WARNING: nothing answers on {address}:{host_port}, the port Vexlyx published for this "
+        f"container, which the kernel forwards to the same address Traefik routes to. The app is "
+        f"most likely bound to 127.0.0.1, which answers neither, so {hostname} will return 502 "
+        "even while the container keeps running; bind it to $HOSTNAME or 0.0.0.0 instead."
     )
 
 
@@ -891,11 +893,11 @@ def cmd_deploy(payload: dict) -> None:
     log_line(f"[vexlyx] Container started: id={container_id[:12] if container_id else 'unknown'}")
 
     # An image that declares no HEALTHCHECK leaves Docker with nothing to grade, so
-    # a container that binds only 127.0.0.1 deploys as a silent 502. Probe the
-    # address the router uses instead, and say so in the log the user reads (#202).
+    # a container that binds only 127.0.0.1 deploys as a silent 502. Probe the port
+    # Vexlyx published for it instead, and say so in the log the user reads (#202).
     if container_id and not container_declares_healthcheck(docker_bin, container_id):
-        address, reachable = probe_routable_listen(docker_bin, container_id, container_port)
-        log_line(f"[vexlyx] {routable_check_log(address, reachable, container_port, hostname)}")
+        address, reachable = probe_published_port(host_port)
+        log_line(f"[vexlyx] {routable_check_log(address, reachable, host_port, hostname)}")
 
     respond({
         "done": True,
