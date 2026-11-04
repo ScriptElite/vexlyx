@@ -1169,7 +1169,10 @@ def cmd_build(payload: dict) -> None:
     start_cmd = payload.get("startCmd")
     cache_key = payload.get("cacheKey")
     env_vars = payload.get("envVars")
-    nixpacks_bin = get_nixpacks_binary()
+
+    # nixpacks is only needed on the nixpacks build path below. Resolving it
+    # here would fail Dockerfile builds (NIXPACKS_NOT_FOUND) on hosts that
+    # have Docker but not nixpacks, even though that path never uses it.
 
     project_path = Path(project_dir)
     if not project_path.is_dir():
