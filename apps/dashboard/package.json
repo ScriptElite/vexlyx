@@ -1,6 +1,6 @@
 {
   "name": "@vexlyx/dashboard",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "private": true,
   "description": "Vexlyx Dashboard — Next.js 15 frontend",
   "scripts": {

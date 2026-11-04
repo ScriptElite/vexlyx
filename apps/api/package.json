@@ -1,6 +1,6 @@
 {
   "name": "@vexlyx/api",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "private": true,
   "description": "Vexlyx API server (Fastify)",
   "main": "./dist/index.js",
