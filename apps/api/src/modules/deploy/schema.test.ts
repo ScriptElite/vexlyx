@@ -55,4 +55,10 @@ describe("DeployBodySchema.domain", () => {
   it("normalises the override the way the domains module stores it", () => {
     expect(DeployBodySchema.parse({ domain: " App.Example.COM " }).domain).toBe("app.example.com");
   });
+
+  it("names the shape it wants when it rejects the override", () => {
+    const result = DeployBodySchema.safeParse({ domain: "http://app.example.com" });
+    if (result.success) throw new Error("the schema accepted a URL");
+    expect(result.error.issues[0]?.message).toContain("must be a hostname");
+  });
 });

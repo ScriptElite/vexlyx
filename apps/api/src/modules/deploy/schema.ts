@@ -6,8 +6,10 @@ import { HostnameSchema, IPV4_REGEX } from "@vexlyx/shared";
 // same validator the domains module uses, plus a bare IPv4 for installs that
 // address the panel by address. docker_manager.py re-checks at write time,
 // because that is the process that produces the file (#192).
+const HOSTNAME_OR_IPV4 = "domain must be a hostname (app.example.com or *.example.com) or an IPv4 address";
+
 const DomainOverrideSchema = z
-  .union([HostnameSchema, z.string().regex(IPV4_REGEX, "domain must be an IPv4 address")])
+  .union([HostnameSchema, z.string().regex(IPV4_REGEX)], { error: HOSTNAME_OR_IPV4 })
   .optional();
 
 export const DeployBodySchema = z.object({
