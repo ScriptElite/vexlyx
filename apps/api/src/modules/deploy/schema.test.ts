@@ -9,10 +9,10 @@ const INJECTIONS: Record<string, string> = {
   "extra Host() clause": "app.example.com`) or Host(`victim.example.org",
   "extra label": 'app.example.com"\n      - "traefik.http.services.stolen.loadbalancer.server.url=http://other:3000',
   "service key": 'app.example.com"\n    volumes:\n      - "/:/host #',
-  "path": "../../etc/shadow",
-  "url": "http://app.example.com",
-  "space": "app example.com",
-  "unicode": "ünïcode.example.com",
+  path: "../../etc/shadow",
+  url: "http://app.example.com",
+  space: "app example.com",
+  unicode: "ünïcode.example.com",
 };
 
 function accepted(domain?: string): boolean {
