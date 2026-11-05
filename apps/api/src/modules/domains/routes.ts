@@ -178,13 +178,15 @@ export async function domainRoutes(app: FastifyInstance) {
   /**
    * Verification used to leave the domain on plain HTTP until somebody also
    * called POST /:id/ssl/provision, so a domain that looked finished served
-   * unencrypted traffic (#161). Ownership is proven at this point and the
-   * hostname already has to resolve for the project to answer at all, so it is
-   * also the right moment to ask for the certificate.
+   * unencrypted traffic (#161). Ownership is proven at this point, which is the
+   * moment asking for the certificate becomes safe to automate: if the A record
+   * has not propagated yet the order fails, Traefik keeps retrying, and HTTPS
+   * arrives on its own once it does.
    *
    * Wildcard hostnames are left on HTTP: the resolver is configured for the
-   * HTTP-01 challenge only, which cannot issue for `*.example.com`, and a doomed
-   * order would spend Let's Encrypt's failed-validation budget on every retry.
+   * HTTP-01 challenge only, which cannot issue for `*.example.com`, so that one
+   * can never succeed and would only spend Let's Encrypt's failed-validation
+   * budget on every retry.
    *
    * Returns whether SSL was switched on. Nothing here fails the request: the
    * verification already succeeded and is committed, so a certificate that could
