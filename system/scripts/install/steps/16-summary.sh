@@ -5,9 +5,31 @@ log_step "[16/16] Done"
 
 COMPOSE=(docker compose --env-file "${VEXLYX_SECRETS_FILE}" -f docker-compose.yml -f docker-compose.prod.yml)
 
-traefik_has_certificate() {
-  "${COMPOSE[@]}" exec -T traefik cat /etc/traefik/acme.json 2>/dev/null \
-    | grep -Eq "\"main\": ?\"$1\""
+# The ACME store is read into a variable and matched in the shell. Piping `cat`
+# into `grep -q` instead reports "no certificate" on a server that does have one
+# (#184): `grep -Eq` exits the moment it matches, the writer is then killed by
+# SIGPIPE, and `set -o pipefail` (line 2) turns that signal into a failed
+# pipeline even though the match succeeded — which happens for any store bigger
+# than the pipe buffer, i.e. every panel holding more than a couple of certs.
+read_acme_store() {
+  "${COMPOSE[@]}" exec -T traefik cat /etc/traefik/acme.json 2>/dev/null || true
+}
+
+acme_store_has_certificate_for() {
+  local store="$1" hostname="$2"
+  # Traefik writes `"main": "host"`; the compact form is accepted too so this
+  # stays as tolerant as the `"main\": ?\""` regex it replaces.
+  [[ "${store}" == *"\"main\": \"${hostname}\""* || "${store}" == *"\"main\":\"${hostname}\""* ]]
+}
+
+# Prints one line per panel hostname that has no certificate; no output means
+# every name is covered. Each hostname is reported on its own line so a
+# partially-issued pair names the hostname that is actually missing.
+missing_certificates() {
+  local store="$1" hostname
+  for hostname in "${VEXLYX_DOMAIN}" "api.${VEXLYX_DOMAIN}"; do
+    acme_store_has_certificate_for "${store}" "${hostname}" || printf '%s\n' "${hostname}"
+  done
 }
 
 # Traefik requests certificates on first start and Let's Encrypt takes up to a
@@ -15,7 +37,7 @@ traefik_has_certificate() {
 # end with a warning.
 log_info "Waiting for the Let's Encrypt certificates for ${VEXLYX_DOMAIN}..."
 cert_tries=45
-until { traefik_has_certificate "${VEXLYX_DOMAIN}" && traefik_has_certificate "api.${VEXLYX_DOMAIN}"; } || (( cert_tries == 0 )); do
+until [[ -z "$(missing_certificates "$(read_acme_store)")" ]] || (( cert_tries == 0 )); do
   sleep 2
   (( cert_tries-- ))
 done
@@ -95,7 +117,10 @@ echo "    docker compose --env-file ${VEXLYX_SECRETS_FILE} -f docker-compose.yml
 echo ""
 echo "  To upgrade or repair the install, just re-run install.sh — every step is safe to run again."
 echo ""
-if ! { traefik_has_certificate "${VEXLYX_DOMAIN}" && traefik_has_certificate "api.${VEXLYX_DOMAIN}"; }; then
-  log_warn "No Let's Encrypt certificate detected yet for ${VEXLYX_DOMAIN} (or api.${VEXLYX_DOMAIN})."
+missing="$(missing_certificates "$(read_acme_store)")"
+if [[ -n "${missing}" ]]; then
+  while IFS= read -r hostname; do
+    log_warn "No Let's Encrypt certificate detected yet for ${hostname}."
+  done <<< "${missing}"
   log_warn "If ${VEXLYX_DOMAIN} does not yet point at this server's public IP, Traefik will keep retrying automatically once DNS propagates — the panel is reachable over HTTPS with a browser warning in the meantime."
 fi
