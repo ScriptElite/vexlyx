@@ -137,10 +137,14 @@ Records are only written to a zone when the domain's `dnsMode` is `MANAGED` (see
 
 ## Exposed development DKIM keys
 
-The `default` signing keys previously tracked for `api.wp-blogs.vexlyx.localhost`,
+The `default` signing keys that were tracked for `api.wp-blogs.vexlyx.localhost`,
 `wp-blogs.vexlyx.localhost`, `test-postfix-mailer.org` and `vexlyx-test.com` are
-public and must not be used. Private keys are runtime state, including keys for
-local development and tests; generate fresh keys on each installation.
+public and must not be used. They are out of the checkout now (#139): every file
+under `docker/postfix/opendkim/keys/` is runtime state, and a tracked file there
+both ships to each new install and is swept into a customer's mail state by the
+legacy state migrator as though it were a real domain's key. Private keys are
+runtime state, including keys for local development and tests; generate fresh keys
+on each installation.
 
 Removing the files from the checkout does not revoke copies in runtime state or
 older Git history. If any deployment used one of these keys, rotate it through
@@ -152,6 +156,8 @@ rotation.
 Run the tracking regression without mail services:
 
 ```bash
-python -m unittest tests.test_mail_credential_security.TestCredentialBuildContexts.test_dkim_private_keys_are_not_tracked
+python -m unittest \
+  tests.test_mail_credential_security.TestCredentialBuildContexts.test_dkim_private_keys_are_not_tracked \
+  tests.test_mail_credential_security.TestCredentialBuildContexts.test_no_dkim_key_files_are_tracked_at_all
 ```
 

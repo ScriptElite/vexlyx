@@ -65,6 +65,22 @@ class TestCredentialBuildContexts(unittest.TestCase):
         ]
         self.assertEqual(tracked_keys, [], "DKIM private keys must remain untracked runtime state")
 
+    def test_no_dkim_key_files_are_tracked_at_all(self):
+        # Filtering on .private leaves the public half of a key pair through: a
+        # tracked default.txt keeps shipping a developer's domain to every
+        # install, .gitignore cannot hide it, and the legacy-state migrator
+        # sweeps it into a customer's mail state as if it were real.
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "-z", "--", "docker/postfix/opendkim/keys"],
+            cwd=root, capture_output=True, check=True,
+        )
+        tracked = [path.decode("utf-8") for path in result.stdout.split(b"\0") if path]
+        self.assertEqual(
+            tracked, [],
+            "docker/postfix/opendkim/keys is runtime state and must hold no tracked file",
+        )
+
     def test_runtime_credentials_and_backups_are_excluded_from_build_contexts(self):
         root = Path(__file__).resolve().parent.parent
         for ignore_file, relative_config in (
