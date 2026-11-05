@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { isWildcardHostname } from "@vexlyx/shared";
 import { DomainService, DomainError } from "./service.js";
 import { DnsService } from "./dns-service.js";
 import { SslService } from "./ssl-service.js";
@@ -174,6 +175,44 @@ export async function domainRoutes(app: FastifyInstance) {
   // ---------------------------------------------------------------------------
   // POST /api/domains/:id/verify — trigger DNS TXT verification
   // ---------------------------------------------------------------------------
+  /**
+   * Verification used to leave the domain on plain HTTP until somebody also
+   * called POST /:id/ssl/provision, so a domain that looked finished served
+   * unencrypted traffic (#161). Ownership is proven at this point, which is the
+   * moment asking for the certificate becomes safe to automate: if the A record
+   * has not propagated yet the order fails, Traefik keeps retrying, and HTTPS
+   * arrives on its own once it does.
+   *
+   * Wildcard hostnames are left on HTTP: the resolver is configured for the
+   * HTTP-01 challenge only, which cannot issue for `*.example.com`, so that one
+   * can never succeed and would only spend Let's Encrypt's failed-validation
+   * budget on every retry.
+   *
+   * Returns whether SSL was switched on. Nothing here fails the request: the
+   * verification already succeeded and is committed, so a certificate that could
+   * not be ordered is logged for the operator, and the manual action is still
+   * there.
+   */
+  const enableSslAfterVerify = async (
+    userId: string,
+    domainId: string,
+  ): Promise<boolean> => {
+    try {
+      const domain = await service.getById(userId, domainId);
+      if (domain.sslEnabled || isWildcardHostname(domain.hostname)) return false;
+      // Parsed through the same schema as the manual action so the defaults
+      // (Let's Encrypt, force HTTPS, auto-renew) cannot drift between the two.
+      await sslService.provisionAutoSsl(userId, domainId, ProvisionSslSchema.parse({}));
+      return true;
+    } catch (err) {
+      app.log.warn(
+        { err, domainId },
+        "Could not provision a certificate for the verified domain automatically",
+      );
+      return false;
+    }
+  };
+
   app.post(
     "/:id/verify",
     { preHandler: [app.requireAuth] },
@@ -181,12 +220,20 @@ export async function domainRoutes(app: FastifyInstance) {
       try {
         const { id } = DomainIdParamSchema.parse(request.params);
         const query = VerifyDomainQuerySchema.parse(request.query);
-        return await service.verify(
+        const result = await service.verify(
           request.userId!,
           id,
           query.mockRecord,
           query.mock === "true",
         );
+        if (result.verified && (await enableSslAfterVerify(request.userId!, id))) {
+          return {
+            ...result,
+            message:
+              "Domain verified successfully. HTTPS is enabled and the certificate is being issued.",
+          };
+        }
+        return result;
       } catch (err) {
         handleDomainError(err, reply);
       }

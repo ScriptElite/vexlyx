@@ -35,8 +35,10 @@ server's own DNS cache, so it reflects real-world propagation. If you click Veri
 record has propagated everywhere, just wait a few minutes and try again — DNS changes can take
 anywhere from a couple of minutes to a few hours depending on your provider's TTL.
 
-Once verified, traffic routing turns on immediately (no container restart) — but only over plain
-HTTP so far. See [Enable HTTPS](#enable-https) below to finish the setup.
+Once verified, traffic routing turns on immediately (no container restart), and Vexlyx requests a
+Let's Encrypt certificate for that hostname in the same step — you do not have to do anything else
+to get HTTPS. The certificate itself takes a moment to issue; see
+[Enable HTTPS](#enable-https) below.
 
 ### Subdomains and wildcards
 
@@ -45,19 +47,29 @@ Once an apex domain (`example.com`) is verified, any subdomain or wildcard you a
 since ownership of the apex already proves it. Add subdomains from the same **Domains** screen; a
 specific subdomain always takes priority over a wildcard covering the same traffic.
 
+Those auto-activated names are served over HTTP until they get their own certificate, and a
+**wildcard** hostname (`*.example.com`) never gets one: certificates here are issued through the
+HTTP-01 challenge, which cannot validate a `*.…` name. Use a specific subdomain for anything you
+want HTTPS on.
+
 ## Enable HTTPS
 
-Domain verification and SSL are separate steps on purpose — verifying only proves ownership and
-turns on HTTP routing. To get a certificate:
+Verifying a domain requests its certificate automatically, so this is normally a step you watch
+rather than perform. What happens:
 
-1. Open the domain's **SSL** tab.
-2. Click **Provision** to request a free Let's Encrypt certificate (the common case), or **Upload
-   Custom Certificate** if you have your own PEM certificate and key.
+1. The moment verification succeeds, Vexlyx enables SSL on the domain and Traefik asks Let's
+   Encrypt for the certificate. The **SSL** tab shows the request.
+2. Issuing takes a few seconds to a couple of minutes, and the domain has to resolve to this
+   server for the challenge to pass. Until it is issued, plain HTTP keeps working.
 3. Vexlyx keeps the certificate current automatically (auto-renew is on by default) and warns you
    7 days before anything is due to expire, with a badge on `/domains` and an amber banner on the
    dashboard home page.
 4. **Force HTTPS** is on by default once a certificate is issued, redirecting plain HTTP requests
    to HTTPS.
+
+Open the domain's **SSL** tab to **Upload Custom Certificate** instead (your own PEM certificate and
+key), or to click **Provision** yourself if the automatic request was skipped — a wildcard, or a
+verification done before this existed.
 
 If a certificate shows `EXPIRED` or `ERROR`, use **Renew** on the same SSL tab — this is also
 useful if you rotate a custom certificate before it lapses.
@@ -84,9 +96,10 @@ to Connect mode until they're removed. If in doubt, this is exactly the case whe
 
 ## Troubleshooting
 
-- **Verified but the site doesn't load** — you probably still need to [enable HTTPS](#enable-https)
-  (or, if you're testing over plain HTTP, check that the A record actually points at the current
-  server IP — it can change after a server migration).
+- **Verified but the site doesn't load over HTTPS** — the certificate is still being issued, or the
+  A record does not point at this server yet, so the HTTP-01 challenge cannot complete. Check the
+  domain's **SSL** tab, and confirm the A record points at the current server IP — it can change
+  after a server migration.
 - **Verify keeps failing after adding the TXT record** — give it more time; registrar propagation
   and TTLs vary. Double-check the record was added at the exact host shown
   (`_vexlyx-challenge.<hostname>`, not just `<hostname>`).
