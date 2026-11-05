@@ -9,7 +9,7 @@ Traefik rule source, so a backtick closes `Host()` and reopens it, and a quote
 plus a newline closes the label and adds another. Measured on the QA box before
 the guard existed, a crafted `domain` produced a manifest `docker compose
 config` accepted with `Host(`app.example.com`) or Host(`victim.example.org`)`
-and with an extra `traefik.services.stolen` label — a project claiming hostnames
+and with a second, invented `traefik.http.*` label — a project claiming hostnames
 the panel never granted it, or pointing a router at another tenant's container.
 
 These tests drive the real generator. Legitimate values — including the
@@ -180,7 +180,11 @@ class TemplateSinkTest(unittest.TestCase):
 
     def test_every_template_places_the_hostname_in_one_backtick_rule(self):
         templates = sorted(TEMPLATE_DIR.glob("*.yml"))
-        self.assertGreaterEqual(len(templates), 1)
+        # All eight are reachable: pick_template() covers seven of them and
+        # docker_manager.py:905 selects php-no-build.yml for the no-build PHP
+        # path. A smaller set here means a template vanished, not that the
+        # sink shrank.
+        self.assertGreaterEqual(len(templates), 8, TEMPLATE_DIR)
         for template in templates:
             lines = [line.strip() for line in template.read_text(encoding="utf-8").splitlines()]
             hits = [line for line in lines if self.PLACEHOLDER in line]
