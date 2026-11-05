@@ -86,6 +86,10 @@ jobs:
       # test would skip itself.
       - run: pip3 install cryptography
       - run: python3 -m unittest discover -s tests -p test_dkim_first_check.py
+      # The helper is now fed its request on stdin so a private key never has
+      # to be an argument; needs cryptography for the throwaway key pair, which
+      # the line above already installed.
+      - run: python3 -m unittest discover -s tests -p test_ssl_manager_stdin.py
       - run: python3 -m unittest discover -s tests -p test_installer_nixpacks.py
       - run: python3 -m unittest discover -s tests -p test_dockerfile_build_nixpacks_absent.py
       # Same ordering guard for the detect step; mocks the resolver and the
