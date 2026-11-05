@@ -1056,7 +1056,6 @@ def cmd_plan(payload: dict) -> None:
     """
     project_dir = require_field(payload, "projectDir")
     env_vars = payload.get("envVars")
-    nixpacks_bin = get_nixpacks_binary()
     project_path = Path(project_dir)
 
     if not project_path.is_dir():
@@ -1085,6 +1084,10 @@ def cmd_plan(payload: dict) -> None:
             "cmd": df_info.get("cmd"),
         })
         return
+
+    # Resolved only after the Dockerfile branch has returned: a project that owns
+    # its Dockerfile never calls nixpacks and must not need it installed (#222).
+    nixpacks_bin = get_nixpacks_binary()
 
     cmd = [nixpacks_bin, "plan", project_dir, "--format", "json"]
 
