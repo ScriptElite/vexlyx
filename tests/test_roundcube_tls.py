@@ -143,6 +143,13 @@ class TestRoundcubeTls(unittest.TestCase):
         return docker("exec", *self.environment(values), self.name, "php", "-r",
                       "$config=[]; require '/test/local.inc.php'; echo json_encode($config);", check=check)
 
+    def config_and_log(self, values):
+        """The same config load, with whatever PHP writes to the error log captured."""
+        result = docker("exec", *self.environment(values), self.name, "php",
+                        "-d", "error_log=/dev/stderr", "-d", "log_errors=1", "-r",
+                        "$config=[]; require '/test/local.inc.php'; echo json_encode($config);")
+        return json.loads(result.stdout), result.stderr
+
     def probe(self, endpoint, development=False):
         values = {"ROUNDCUBE_MAIL_TLS_PEER_NAME": PEER}
         if development:
@@ -175,6 +182,36 @@ class TestRoundcubeTls(unittest.TestCase):
     def test_nothing_set_means_verification_is_on(self):
         config = json.loads(self.config({}).stdout)
         self.assertTrue(config["imap_conn_options"]["ssl"]["verify_peer"])
+
+    def test_blank_peer_name_stays_secure_and_explains_itself(self):
+        # Absent, empty and whitespace-only all mean "no name to check against". That
+        # keeps verification on, which is correct, and used to be the one misconfiguration
+        # of this file that produced no message anywhere an operator would look.
+        for values in ({}, {"ROUNDCUBE_MAIL_TLS_PEER_NAME": ""}, {"ROUNDCUBE_MAIL_TLS_PEER_NAME": "   "}):
+            with self.subTest(values=values):
+                config, log = self.config_and_log(values)
+                for key in ("imap_conn_options", "smtp_conn_options"):
+                    self.assertTrue(config[key]["ssl"]["verify_peer"])
+                    self.assertTrue(config[key]["ssl"]["verify_peer_name"])
+                    self.assertFalse(config[key]["ssl"]["allow_self_signed"])
+                    self.assertNotIn("peer_name", config[key]["ssl"])
+                self.assertIn("ROUNDCUBE_MAIL_TLS_PEER_NAME", log)
+                self.assertIn("VEXLYX_MAIL_HOSTNAME", log)
+
+        # A real peer name, and the development posture that has no name to check,
+        # both stay quiet: the line is a diagnosis of a mismatch, not a banner.
+        for values in ({"ROUNDCUBE_MAIL_TLS_PEER_NAME": PEER},
+                       {"ROUNDCUBE_MAIL_TLS_VERIFY": "false"},
+                       {"ROUNDCUBE_MAIL_TLS_VERIFY": "false", "ROUNDCUBE_MAIL_TLS_PEER_NAME": ""}):
+            with self.subTest(quiet=values):
+                _, log = self.config_and_log(values)
+                self.assertNotIn("is empty", log)
+
+    def test_whitespace_around_the_peer_name_is_not_part_of_the_name(self):
+        config, log = self.config_and_log({"ROUNDCUBE_MAIL_TLS_PEER_NAME": f"  {PEER}  "})
+        for key in ("imap_conn_options", "smtp_conn_options"):
+            self.assertEqual(config[key]["ssl"]["peer_name"], PEER)
+        self.assertNotIn("is empty", log)
 
     def test_imap_certificate_validation_and_credentials(self):
         self.assert_certificate_matrix("imap")
