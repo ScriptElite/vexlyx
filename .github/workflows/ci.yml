@@ -92,6 +92,9 @@ jobs:
       # subprocess layer, so it spawns nothing.
       - run: python3 -m unittest discover -s tests -p test_dockerfile_plan_nixpacks_absent.py
       - run: python3 -m unittest discover -s tests -p test_nginx_conf_refresh.py
+      # Drives the real compose generator with crafted hostnames; needs nothing
+      # but the repo checkout.
+      - run: python3 -m unittest discover -s tests -p test_deploy_hostname_guard.py
       # Symlinked Dockerfile / deploy files: plants real links, so it needs the
       # Linux runner (it self-skips where symlink() is not permitted).
       - run: python3 -m unittest discover -s tests -p test_symlink_safe_project_files.py

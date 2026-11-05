@@ -116,6 +116,27 @@ def assert_deploy_dir_is_not_a_symlink(compose_dir: Path) -> None:
         )
 
 
+# The hostname lands in the compose file inside a double-quoted YAML label, as
+# the Traefik rule Host(`value`). A backtick there closes that rule and opens
+# another, and a quote or newline closes the label and starts a new one, so a
+# deploy could otherwise claim a hostname the panel never granted it, or point
+# a router at another project's container (#192). The set below is about rule
+# safety, not hostname syntax: it drops every character the rule or the YAML
+# needs, `/` included so a value cannot read as a path either. `apps/api`
+# validates the shape (DeployBodySchema) before this is reached; this is the
+# check that stands on its own, because this is the process writing the file.
+_SAFE_HOSTNAME = re.compile(r"[A-Za-z0-9._*-]{1,253}")
+
+
+def assert_hostname_is_rule_safe(hostname: str) -> None:
+    """Refuse a hostname that cannot be written into the proxy rule as data."""
+    if not isinstance(hostname, str) or not _SAFE_HOSTNAME.fullmatch(hostname):
+        fail(
+            "Hostname must be a DNS name or an IP address; refusing to write it into the proxy rule",
+            "INVALID_HOSTNAME",
+        )
+
+
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
@@ -534,6 +555,7 @@ def generate_compose_file(
     env_vars: dict[str, str],
     extra_placeholders: dict[str, str] | None = None,
 ) -> None:
+    assert_hostname_is_rule_safe(hostname)
     template = template_path.read_text(encoding="utf-8")
     env_block = build_env_block(env_vars)
     content = (
