@@ -4,6 +4,14 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+### Fixed
+
+- The installer no longer warns "No Let's Encrypt certificate detected" on a server that has the certificates. The summary step read Traefik's ACME store by piping `docker compose exec -T traefik cat acme.json` into `grep -Eq`, and `grep -q` exits the instant it matches — so the writer was still delivering the rest of the store when its read end closed, it died of `SIGPIPE`, and `set -o pipefail` at the top of the step made the whole pipeline report failure *even though the match had succeeded*. Any store bigger than the kernel's ~64 KB pipe buffer hit this, which is every panel holding more than a couple of certificates, and `2>/dev/null` hid the only error message that would have explained it. The store is now read into a variable once and matched in the shell, so no early-exiting reader is involved. The check also reports each hostname it cannot find on its own line instead of a single warning covering `domain` *and* `api.domain` together, so a partially-issued pair says which name is actually missing. The existing test could not have caught this because it re-implemented the lookup inline against a 60-byte fixture; the new tests execute the step file's real function text under the step file's own `pipefail`, against a store that is both multi-line (Traefik pretty-prints its JSON, and a single-line fixture forces the reader to consume the whole file, which hides the bug entirely) and far larger than the pipe buffer, and while one of them asserts the block never pipes into `grep` again another asserts that the old shape really does fail on that fixture — so the fixture cannot quietly stop testing anything (#184).
+
+### Upgrade notes
+
+- Nothing to do. `system/scripts/install/steps/16-summary.sh` is read from the repo checkout on each installer run, so pulling the new code is enough — no image rebuild, and no behaviour of a healthy install changes apart from the warning that was wrong.
+
 ## [0.4.6] - 2026-11-05
 
 ### Fixed
