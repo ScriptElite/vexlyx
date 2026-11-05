@@ -128,7 +128,14 @@ async function runSslManager(
     : process.env.PYTHONPATH;
 
   return new Promise((res, rej) => {
-    const child = spawn(pythonExe, [scriptPath, command, JSON.stringify(payload)], {
+    // The payload carries the uploaded private key for `save_custom`, so it
+    // goes to the helper on stdin and never into argv, where any local process
+    // could read it out of `ps` or `/proc/<pid>/cmdline` for as long as the
+    // helper runs (#190). `ssl_manager.py`'s `main()` already reads
+    // `{"command", "payload"}` from stdin when given no argument, and the
+    // spawn already opens a stdin pipe; argv stays supported for the CLI and
+    // the system-layer tests.
+    const child = spawn(pythonExe, [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -190,6 +197,14 @@ async function runSslManager(
     child.on("error", (err) => {
       rej(new DomainError(`Failed to spawn ssl_manager.py: ${err.message}`, "SSL_SPAWN_ERROR", 500));
     });
+
+    // A helper that dies before reading (missing interpreter, import error)
+    // closes the pipe, and an unhandled 'error' on a writable is what turns
+    // that into a crashed API process. The `close` handler above already
+    // reports the real failure.
+    child.stdin.on("error", () => undefined);
+    child.stdin.write(JSON.stringify({ command, payload }));
+    child.stdin.end();
   });
 }
 
