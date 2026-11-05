@@ -46,7 +46,7 @@ collect_config() {
   VEXLYX_ENABLE_PUBLIC_DNS="${VEXLYX_ENABLE_PUBLIC_DNS:-false}"
   VEXLYX_MAIL_STATE_DIR="${VEXLYX_MAIL_STATE_DIR:-/var/lib/vexlyx/mail}"
   [[ "$VEXLYX_MAIL_STATE_DIR" =~ ^/[a-zA-Z0-9_./-]+$ && "$VEXLYX_MAIL_STATE_DIR" != / ]] || die "VEXLYX_MAIL_STATE_DIR must be a dedicated absolute path without whitespace or shell characters."
-  VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqs-org/vexlyx.git}"
+  VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqshq/vexlyx.git}"
   VEXLYX_REPO_REF="${VEXLYX_REPO_REF:-latest}"
 
   export VEXLYX_DOMAIN VEXLYX_BASE_DOMAIN VEXLYX_ADMIN_EMAIL VEXLYX_ADMIN_NAME VEXLYX_ADMIN_PASSWORD
