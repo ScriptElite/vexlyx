@@ -91,13 +91,20 @@ since Vexlyx doesn't retain plaintext passwords to hand over automatically.
 Any IMAP/SMTP client (Apple Mail, Outlook, Thunderbird, the stock mail app on your phone) works
 with these settings:
 
-|                 | Host                          | Port  | Security |
-| --------------- | ----------------------------- | ----- | -------- |
-| Incoming (IMAP) | Your configured mail hostname | `993` | SSL/TLS  |
-| Outgoing (SMTP) | Your configured mail hostname | `587` | STARTTLS |
+|                    | Host                          | Port  | Security | Authentication  |
+| ------------------ | ----------------------------- | ----- | -------- | --------------- |
+| Incoming (IMAP)    | Your configured mail hostname | `993` | SSL/TLS  | Normal password |
+| Incoming (IMAP)    | Your configured mail hostname | `143` | STARTTLS | Normal password |
+| Outgoing (SMTP)    | Your configured mail hostname | `587` | STARTTLS | Normal password |
 
 Username is the full mailbox address (`jane@example.com`); password is the one shown at creation
 or reset. There's no POP3 — only IMAP.
+
+`587` is the only submission port: Vexlyx does not listen on `465` (implicit TLS SMTP), and port
+`25` is for server-to-server delivery rather than mail clients. Both the `143` and `587` listeners
+refuse a password until the connection is encrypted, so a client left with its security set to
+*None* fails at the password step with `Must issue a STARTTLS command first` — that is the server
+requiring TLS, not a wrong password.
 
 ## Troubleshooting delivery
 

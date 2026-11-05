@@ -78,12 +78,17 @@ interface ClientSetupField {
   key: string;
   label: string;
   value: string;
+  /** What the app's own dropdown has to be set to for this value to work. */
+  hint?: string;
+  /** False for values that are a dropdown choice rather than text to paste. */
+  copyable?: boolean;
 }
 
-function buildClientSetupSections(host: string, address: string): {
+export function buildClientSetupSections(host: string, address: string): {
   title: string;
   icon: typeof Inbox;
   fields: ClientSetupField[];
+  note?: string;
 }[] {
   return [
     {
@@ -91,8 +96,25 @@ function buildClientSetupSections(host: string, address: string): {
       icon: Inbox,
       fields: [
         { key: "imap-host", label: "Server / Hostname", value: host },
-        { key: "imap-port", label: "Port (SSL/TLS)", value: "993" },
-        { key: "imap-port-starttls", label: "Port (STARTTLS)", value: "143" },
+        {
+          key: "imap-port",
+          label: "Port (SSL/TLS)",
+          value: "993",
+          hint: "Connection security: SSL/TLS — encrypted from the first byte.",
+        },
+        {
+          key: "imap-port-starttls",
+          label: "Port (STARTTLS)",
+          value: "143",
+          hint: "Connection security: STARTTLS — starts plain and upgrades before the password.",
+        },
+        {
+          key: "imap-auth",
+          label: "Authentication",
+          value: "Normal password",
+          copyable: false,
+          hint: "The server offers PLAIN and LOGIN, and only once the connection is encrypted.",
+        },
         { key: "imap-username", label: "Username", value: address },
       ],
     },
@@ -101,11 +123,80 @@ function buildClientSetupSections(host: string, address: string): {
       icon: Send,
       fields: [
         { key: "smtp-host", label: "Server / Hostname", value: host },
-        { key: "smtp-port", label: "Port (STARTTLS)", value: "587" },
+        {
+          key: "smtp-port",
+          label: "Port (STARTTLS)",
+          value: "587",
+          hint: "Connection security: STARTTLS. Left on \"None\", the server refuses the password and the app reports \"Must issue a STARTTLS command first\".",
+        },
+        {
+          key: "smtp-auth",
+          label: "Authentication",
+          value: "Normal password",
+          copyable: false,
+          hint: "The server offers PLAIN and LOGIN, and only once the connection is encrypted.",
+        },
         { key: "smtp-username", label: "Username", value: address },
       ],
+      note: "587 with STARTTLS is the only submission port Vexlyx listens on. Port 465 (implicit TLS) and plain port 25 are not offered to mail clients.",
     },
   ];
+}
+
+export function ClientSetupSections({ host, address }: { host: string; address: string }) {
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copy = (value: string, key: string) => {
+    void navigator.clipboard.writeText(value);
+    setCopiedKey(key);
+    toast.success("Copied to clipboard");
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  return (
+    <>
+      {buildClientSetupSections(host, address).map((section) => (
+        <div key={section.title} className="space-y-2">
+          <h4 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            <section.icon className="h-3.5 w-3.5 text-muted-foreground" />
+            {section.title}
+          </h4>
+          <div className="overflow-hidden rounded-md border border-border">
+            {section.fields.map((field, idx) => (
+              <div
+                key={field.key}
+                className={cn(
+                  "flex items-center justify-between gap-2 px-3 py-2",
+                  idx !== 0 && "border-t border-border",
+                )}
+              >
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">{field.label}</p>
+                  <code className="block truncate font-mono text-sm text-foreground">{field.value}</code>
+                  {field.hint && <p className="mt-1 text-xs leading-snug text-muted-foreground">{field.hint}</p>}
+                </div>
+                {field.copyable !== false && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 shrink-0"
+                    onClick={() => copy(field.value, field.key)}
+                  >
+                    {copiedKey === field.key ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+          {section.note && <p className="text-xs leading-snug text-muted-foreground">{section.note}</p>}
+        </div>
+      ))}
+    </>
+  );
 }
 
 export function MailboxesPanel() {
@@ -149,7 +240,6 @@ export function MailboxesPanel() {
 
   // Mail client setup dialog state
   const [setupTarget, setSetupTarget] = useState<MailboxResponse | null>(null);
-  const [copiedSetupField, setCopiedSetupField] = useState<string | null>(null);
   const clientHost =
     process.env.NEXT_PUBLIC_MAIL_HOSTNAME ||
     (typeof window !== "undefined" ? window.location.hostname : "your-server");
@@ -165,13 +255,6 @@ export function MailboxesPanel() {
     setCopiedPassword(true);
     toast.success("Copied to clipboard");
     setTimeout(() => setCopiedPassword(false), 2000);
-  };
-
-  const copySetupField = (value: string, key: string) => {
-    void navigator.clipboard.writeText(value);
-    setCopiedSetupField(key);
-    toast.success("Copied to clipboard");
-    setTimeout(() => setCopiedSetupField(null), 2000);
   };
 
   const resetCreateForm = () => {
@@ -451,43 +534,7 @@ export function MailboxesPanel() {
           </DialogHeader>
 
           <div className="space-y-4">
-            {setupTarget &&
-              buildClientSetupSections(clientHost, setupTarget.address).map((section) => (
-                <div key={section.title} className="space-y-2">
-                  <h4 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                    <section.icon className="h-3.5 w-3.5 text-muted-foreground" />
-                    {section.title}
-                  </h4>
-                  <div className="overflow-hidden rounded-md border border-border">
-                    {section.fields.map((field, idx) => (
-                      <div
-                        key={field.key}
-                        className={cn(
-                          "flex items-center justify-between gap-2 px-3 py-2",
-                          idx !== 0 && "border-t border-border",
-                        )}
-                      >
-                        <div className="min-w-0">
-                          <p className="text-xs text-muted-foreground">{field.label}</p>
-                          <code className="block truncate font-mono text-sm text-foreground">{field.value}</code>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          onClick={() => copySetupField(field.value, field.key)}
-                        >
-                          {copiedSetupField === field.key ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-500" />
-                          ) : (
-                            <Copy className="h-3.5 w-3.5" />
-                          )}
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+            {setupTarget && <ClientSetupSections host={clientHost} address={setupTarget.address} />}
 
             <div className="flex items-start gap-2 rounded-md border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
               <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
