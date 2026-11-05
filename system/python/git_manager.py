@@ -83,6 +83,11 @@ def cmd_clone(payload: dict) -> None:
             # The URL never contains credentials; setting it before fetch also makes
             # switching a project between repositories deterministic.
             _run(["git", "-C", str(dest), "remote", "set-url", "origin", git_url], env=env)
+            # --single-branch at clone restricts the fetch refspec to the branch cloned, so a
+            # plain fetch never learns of a branch created later and checkout cannot guess it
+            # even once the remote-tracking ref exists (#153).
+            _run(["git", "-C", str(dest), "config", "remote.origin.fetch",
+                  "+refs/heads/*:refs/remotes/origin/*"], env=env)
             _run(["git", "-C", str(dest), "fetch", "origin"], env=env)
             _run(["git", "-C", str(dest), "checkout", branch], env=env)
             _run(["git", "-C", str(dest), "pull", "origin", branch], env=env)
