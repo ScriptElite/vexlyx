@@ -60,16 +60,18 @@ The Postgres, MySQL and Redis dev ports are published on loopback only (`127.0.0
 | Port | `6379` (bound to `127.0.0.1` only in development; not published in production) |
 | Authentication | `requirepass` from `REDIS_PASSWORD` (dev default `vexlyx_dev`; production requires a generated value) |
 | Max memory | `256mb` |
-| Eviction | `allkeys-lru` |
-| Persistence | AOF (`appendonly yes`) |
+| Eviction | `noeviction` — `--maxmemory-policy` on the `redis-server` command line in `docker-compose.yml`. Sessions, queued jobs and single-use tokens must never be silently evicted, so a full instance refuses writes instead of dropping keys |
+| Persistence | AOF (`appendonly yes`) plus the default RDB snapshot schedule (`save 3600 1 300 100 60 10000`), which the command line does not override |
 | Volume | `vexlyx_redis_data` |
 
 **Connection string:** `redis://:vexlyx_dev@localhost:6379` (development). Production uses `redis://:<REDIS_PASSWORD>@redis:6379`, set by `docker-compose.prod.yml`.
 
 **Usage in Vexlyx:**
 - **Sessions** — the custom session plugin (`apps/api/src/plugins/auth.ts`, not a third-party auth library) stores signed session tokens here, keyed `session:<id>`, with a 24-hour TTL
-- **Caching** — API response caching, rate limiting
+- **Caching** — one entry: the 6-hour "is a newer Vexlyx release available" lookup keyed `system:update-info` (`apps/api/src/modules/system/update-service.ts:11-12`). API responses are not cached here
 - **Queues** — BullMQ background job processing (see below)
+- **Locks and one-shot values** — a scheduled-task run claims a per-task lock so it never overlaps its predecessor (`apps/api/src/modules/scheduled-tasks/service.ts:371`), each GitHub webhook delivery is claimed once for 24 hours under `github:webhook-delivery:<id>` (`apps/api/src/modules/webhooks/delivery.ts:3-18`), and GitHub's single-use OAuth `state`, 2FA challenge tokens and password-reset send throttles are short-TTL Redis values
+- **Rate limiting** — not in Redis. `@fastify/rate-limit` runs on its default in-process store (`apps/api/src/modules/auth/routes.ts:20-24`), so the login and registration counters are per-process and start over when the API restarts
 
 **Test connectivity:**
 ```bash
