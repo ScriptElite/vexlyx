@@ -4,6 +4,14 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+### Fixed
+
+- A fresh install no longer depends on a GitHub rename redirect. `install.sh` (`:206`) and `system/scripts/install/config.sh` (`:49`) each defaulted `VEXLYX_REPO_URL` to `https://github.com/atlantiqs-org/vexlyx.git` — the org slug from before the rename to `atlantiqshq` — and it resolved only because GitHub redirects a renamed owner: measured on a live server, `atlantiqs-org/vexlyx` answers `301` while `atlantiqshq/vexlyx` answers `200`. The clone then *records* the URL it was given, so every later fetch kept leaning on that redirect, and the old slug is not ours to keep reserved. This is the one place where the launch checklist and the code disagreed: the landing page's `DEPLOY.md` already tells the releaseer to "check `install.sh` and `system/scripts/install/config.sh` in `atlantiqshq/vexlyx` both point at `https://github.com/atlantiqshq/vexlyx.git`", and both files pointed somewhere else. Both defaults now name the current slug, and an operator-set `VEXLYX_REPO_URL` still wins because the expansion is unchanged — that is the fork/mirror install path. Nothing was broken before this, and it is written as a dependency removed rather than a failure repaired: the same probe run installed `v0.4.6` correctly through the old URL (resolved as a tag, cloned, `VEXLYX_VERSION` in the tree reading `0.4.6`). The reason for a test instead of a grep is that the default lives in **two** files that have to stay matched — `tests/test_installer_repo_url.py` fails if the bootstrap and the orchestrator disagree, if either stops naming the current slug, or if either stops honouring an override. `DEV.md`'s older `atlantiqs-org` line is left alone deliberately: it is inside "Create Your GitHub Repository", where the URL is the reader's own repo, not a remote the installer uses.
+
+### Upgrade notes
+
+- Nothing to do. An existing checkout is untouched — this default only applies where `VEXLYX_REPO_URL` was never set, and an install that already recorded the old URL keeps following the redirect until its next fresh install.
+
 ## [0.4.7] - 2026-11-05
 
 ### Fixed

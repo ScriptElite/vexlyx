@@ -203,7 +203,7 @@ update_checkout() {
 
 main() {
   VEXLYX_HOME="${VEXLYX_HOME:-/opt/vexlyx}"
-  VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqs-org/vexlyx.git}"
+  VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqshq/vexlyx.git}"
 
   if [[ ${EUID} -ne 0 ]]; then
     echo "[ERROR] This installer must be run as root (or with sudo)." >&2
