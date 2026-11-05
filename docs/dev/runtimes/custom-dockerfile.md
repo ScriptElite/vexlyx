@@ -126,6 +126,51 @@ another probing tool. If the Dockerfile defines `HEALTHCHECK`, Docker preserves
 and uses that image-level check; otherwise Traefik routes to the running
 container without an invented dependency.
 
+### 5. Volumes
+
+The template declares no `volumes:` key, so the only storage a Docker project can
+have is whatever its image declares with `VOLUME`. Compose creates an anonymous
+volume for each such path on the first deploy and reattaches it on every later one,
+because the deploy command is:
+
+```
+docker compose up -d --force-recreate --pull missing    # docker_manager.py:889
+```
+
+`--force-recreate` rebuilds the container but is not `--renew-anon-volumes` (`-V`),
+which is what would discard the anonymous volume. The result, measured on a live
+server with a two-tag probe image:
+
+| action | container | anonymous volume | contents of the `VOLUME` path |
+| --- | --- | --- | --- |
+| first deploy of `v1` | new | created, initialised from the image | `v1` |
+| the app writes `upload.txt` into the path | — | same volume | kept |
+| redeploy after the image becomes `v2` | recreated | **same volume, reattached** | still `v1`, and `upload.txt` is still there — the `v2` file baked into the image is masked |
+| **Remove** (`down --volumes --remove-orphans`, `docker_manager.py:1027`) | destroyed | **deleted** | gone, including the user's writes |
+| next deploy | new | new volume, initialised from the image | `v2` |
+
+Two consequences operators hit in practice:
+
+- **Anything written into a `VOLUME` path by the image at build time only reaches the
+  site when the volume is new.** A WordPress theme or core files baked into an image
+  that declares `VOLUME /var/www/html` will not update on redeploy; the push succeeds,
+  the container is replaced, and the site keeps serving the first version. The fix is
+  in the image, not the platform: an entrypoint that refreshes baked-in content into
+  the mounted path on start (see the workaround in #157).
+- **`Remove` names the volumes but not what is inside them.** The confirmation dialog
+  says it will "remove associated volumes" and that "your source code and deployment
+  history will remain intact" (`ContainerControls.tsx:327`) — both true, and both
+  beside the point: what goes with the volume is the runtime data, the uploads,
+  installed plugins and databases the site has accumulated. Stop, start and redeploy
+  all keep that volume; Remove is the one action that destroys it, and it is the only
+  way to make baked-in image content arrive.
+
+Named volumes, a dashboard view of the anonymous volume, and a separate "delete data"
+action are the feature half of #157 and are not implemented. A volume that was
+reattached across a `--force-recreate` was also observed to survive its own
+`down --volumes` as an orphan, so `docker volume prune` may be needed to reclaim the
+disk after a removal.
+
 ---
 
 ## 4. API Endpoints
