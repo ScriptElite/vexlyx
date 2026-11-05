@@ -435,7 +435,7 @@ Integrate Nixpacks for zero-configuration builds. Auto-detect framework from sou
 - [x] `nixpacks build` generates Docker image
 - [x] Build logs stored and polled progressively by frontend (Socket.io streaming in F1.6)
 - [x] Build queue managed via BullMQ and Redis
-- [x] Support for custom build commands override
+- [x] Support for custom build commands override (Build Settings panel in F5.34)
 
 **Test Plan:**
 1. Node.js project → Nixpacks detects, builds successfully
