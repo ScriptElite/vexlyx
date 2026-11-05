@@ -116,6 +116,33 @@ def assert_deploy_dir_is_not_a_symlink(compose_dir: Path) -> None:
         )
 
 
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def write_generated_file(dest: Path, content: str) -> None:
+    """Write a generated deploy/ file as root without following a link at its
+    own name (#193): the deploy directory check above does not cover `Dockerfile`
+    or `nginx.conf` left as links, and the whole host checkout is bind-mounted
+    here at the same path, so writing through one overwrites an arbitrary host
+    file as root. O_TRUNC keeps the inode, because a running site bind-mounts
+    its nginx.conf as a single file."""
+    if dest.is_symlink():
+        fail(
+            f"{dest} is a symbolic link; refusing to write the generated file through it",
+            "UNSAFE_DEPLOY_FILE",
+        )
+    try:
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW, 0o644)
+    except OSError as exc:
+        # Also covers a link swapped in between the check and the open.
+        fail(
+            f"Cannot open {dest} for writing without following links: {exc.strerror}",
+            "UNSAFE_DEPLOY_FILE",
+        )
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
 def _chown_directory_no_follow(path: Path, uid: int, gid: int) -> None:
     # Opening the directory with O_NOFOLLOW and changing the open descriptor
     # means a symlink planted by the application cannot redirect the chown to
@@ -522,7 +549,7 @@ def generate_compose_file(
     for key, value in (extra_placeholders or {}).items():
         content = content.replace(f"{{{{{key}}}}}", value)
     compose_dir.mkdir(parents=True, exist_ok=True)
-    (compose_dir / "docker-compose.yml").write_text(content, encoding="utf-8")
+    write_generated_file(compose_dir / "docker-compose.yml", content)
 
 
 def generate_nginx_conf(
@@ -538,7 +565,7 @@ def generate_nginx_conf(
     content = render_nginx_conf(template_path, placeholders)
     compose_dir.mkdir(parents=True, exist_ok=True)
     dest = compose_dir / "nginx.conf"
-    dest.write_text(content, encoding="utf-8")
+    write_generated_file(dest, content)
     return dest
 
 
@@ -576,7 +603,7 @@ def refresh_nginx_conf_for(project_dir: Path, project_type: str, project_id: str
     rendered = render_nginx_conf(get_nginx_templates_dir() / template, placeholders)
     if conf.read_text(encoding="utf-8") == rendered:
         return "unchanged"
-    conf.write_text(rendered, encoding="utf-8")
+    write_generated_file(conf, rendered)
     return "updated"
 
 
