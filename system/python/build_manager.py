@@ -72,6 +72,66 @@ def require_field(payload: dict, field: str) -> str:
     return value  # type: ignore[return-value]  — fail() exits
 
 
+# ---------------------------------------------------------------------------
+# Symlink-safe project file IO (#193)
+#
+# A project directory is a repository checkout and git preserves symlinks, so
+# `Dockerfile` can be a link anywhere this root container can reach — and the
+# whole host checkout is bind-mounted here at the same path. Following such a
+# link turns a panel read into host file disclosure and a panel save into a
+# root overwrite of the panel's own code.
+# ---------------------------------------------------------------------------
+
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+class UnsafePathError(Exception):
+    """A project path is a symlink or resolves outside its own workspace."""
+
+
+def _stays_in(root: Path, target: Path) -> bool:
+    # Both sides resolved, so an install reached through a symlinked parent is
+    # not read as an escape.
+    real_root = os.path.realpath(root)
+    real_target = os.path.realpath(target)
+    return real_target == real_root or real_target.startswith(real_root + os.sep)
+
+
+def read_project_text(project_dir: Path, path: Path) -> str | None:
+    """Return the file's text only when its real path stays in the workspace.
+
+    An escaping link reads as absent rather than raising — the read paths then
+    report no file, which is the same answer they give for a missing one."""
+    try:
+        real = os.path.realpath(path)
+        if not _stays_in(project_dir, Path(real)) or not os.path.isfile(real):
+            return None
+        with open(real, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def write_project_file(project_dir: Path, path: Path, content: str) -> None:
+    """Write a panel-owned file, never through a link at its own name.
+
+    O_TRUNC on the opened descriptor keeps the inode: a container bind-mounts
+    single generated files by path, so a new inode would not reach it."""
+    if path.is_symlink():
+        raise UnsafePathError(f"{path} is a symbolic link; refusing to write through it")
+    if not _stays_in(project_dir, path.parent):
+        raise UnsafePathError(f"{path} resolves outside the project directory")
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW, 0o644)
+    except OSError as exc:
+        # Also covers the link swapped in between the check and the open.
+        raise UnsafePathError(
+            f"{path} could not be opened for writing without following links: {exc.strerror}"
+        ) from exc
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
 def get_nixpacks_binary() -> str:
     """Find nixpacks in PATH or common install directories."""
     binary = shutil.which("nixpacks")
@@ -261,10 +321,7 @@ def parse_dockerfile_info(dockerfile_path: Path | None) -> dict:
             "envKeys": [],
         }
 
-    try:
-        content = dockerfile_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        content = ""
+    content = read_project_text(dockerfile_path.parent, dockerfile_path) or ""
 
     base_image = None
     exposed_ports: list[int] = []
@@ -1547,18 +1604,12 @@ def cmd_dockerfile_get(payload: dict) -> None:
     dockerignore_p = target_path / ".dockerignore"
 
     df_content = ""
-    if dockerfile_p and dockerfile_p.is_file():
-        try:
-            df_content = dockerfile_p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+    if dockerfile_p:
+        df_content = read_project_text(target_path, dockerfile_p) or ""
 
     di_content = ""
     if dockerignore_p.is_file():
-        try:
-            di_content = dockerignore_p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+        di_content = read_project_text(target_path, dockerignore_p) or ""
 
     df_info = parse_dockerfile_info(dockerfile_p) if dockerfile_p else {}
 
@@ -1593,10 +1644,16 @@ def cmd_dockerfile_save(payload: dict) -> None:
     dockerignore_p = target_path / ".dockerignore"
 
     if dockerfile_content is not None:
-        dockerfile_p.write_text(dockerfile_content, encoding="utf-8")
+        try:
+            write_project_file(target_path, dockerfile_p, dockerfile_content)
+        except UnsafePathError as exc:
+            fail(str(exc), "UNSAFE_DOCKERFILE_LINK")
 
     if dockerignore_content is not None:
-        dockerignore_p.write_text(dockerignore_content, encoding="utf-8")
+        try:
+            write_project_file(target_path, dockerignore_p, dockerignore_content)
+        except UnsafePathError as exc:
+            fail(str(exc), "UNSAFE_DOCKERIGNORE_LINK")
 
     df_info = parse_dockerfile_info(dockerfile_p)
 
