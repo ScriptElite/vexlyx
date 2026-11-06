@@ -738,8 +738,10 @@ export class SslService {
     }
 
     if (domain.certificate) {
-      // Clean up files via ssl_manager.py
-      await runSslManager("delete_cert", { domainId: domain.id });
+      // Clean up files via ssl_manager.py. The hostname goes with it so the
+      // helper can recognise the <host>.crt/.key convenience copies
+      // generate_self_signed() left next to this domain's own pair (#195).
+      await runSslManager("delete_cert", { domainId: domain.id, hostname: domain.hostname });
 
       // Delete certificate database record
       await this.prisma.certificate.delete({

@@ -90,6 +90,10 @@ jobs:
       # to be an argument; needs cryptography for the throwaway key pair, which
       # the line above already installed.
       - run: python3 -m unittest discover -s tests -p test_ssl_manager_stdin.py
+      # The private-key file modes are the subject of #195. The mode assertions
+      # in this suite skip off POSIX, so this is the runner where they actually
+      # run; it drives the real helper in a temporary directory.
+      - run: python3 -m unittest discover -s tests -p test_ssl_key_file_modes.py
       - run: python3 -m unittest discover -s tests -p test_installer_nixpacks.py
       - run: python3 -m unittest discover -s tests -p test_dockerfile_build_nixpacks_absent.py
       # Same ordering guard for the detect step; mocks the resolver and the

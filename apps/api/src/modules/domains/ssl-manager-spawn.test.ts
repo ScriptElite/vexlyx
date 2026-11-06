@@ -129,4 +129,37 @@ describe("ssl_manager.py invocation (#190)", () => {
     expect(commandLine).not.toContain(PRIVATE_KEY);
     for (const arg of call.args) expect(arg).not.toMatch(/BEGIN (RSA )?PRIVATE KEY/);
   });
+
+  // A certificate deletion has to reach the <host>.crt/.key convenience copies
+  // generate_self_signed() left beside the domain's own pair, and only the
+  // hostname tells the helper what those names are (#195).
+  it("names the hostname when it asks the helper to delete a certificate", async () => {
+    const prisma = {
+      domain: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "d1",
+          hostname: "app.example.com",
+          userId: "u1",
+          status: "ACTIVE",
+          sslEnabled: true,
+          project: null,
+          certificate: { id: "c1", domainId: "d1" },
+        }),
+        update: vi.fn().mockResolvedValue(undefined),
+      },
+      certificate: {
+        delete: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await new SslService(prisma as unknown as PrismaClient).disableSsl("u1", "d1");
+
+    expect(stdinDocuments).toHaveLength(1);
+    const document = JSON.parse(stdinDocuments[0] ?? "") as {
+      command: string;
+      payload: Record<string, unknown>;
+    };
+    expect(document.command).toBe("delete_cert");
+    expect(document.payload).toEqual({ domainId: "d1", hostname: "app.example.com" });
+  });
 });
