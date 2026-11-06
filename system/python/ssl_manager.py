@@ -18,6 +18,7 @@ import datetime
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 # Ensure site-packages from all known local and system Python environments are in sys.path
@@ -67,6 +68,48 @@ def respond(data: dict) -> None:
     print(json.dumps(data), flush=True)
 
 
+# ---------------------------------------------------------------------------
+# File Writing
+# ---------------------------------------------------------------------------
+
+# In the shipped stack the only thing that reads a key here is Traefik, and both
+# its container and the API that spawns this helper run as root, so 0600 costs
+# nothing (#195). A certificate is public, so it keeps 0644 and any other tooling
+# can still read it.
+PRIVATE_KEY_MODE = 0o600
+CERTIFICATE_MODE = 0o644
+# The directory is created with no group or other bits. It is not chmod'd later:
+# an existing install's directory only ever leaks file *names*, and tightening a
+# directory other tooling may already traverse is a wider decision than this fix.
+CERTS_DIR_MODE = 0o700
+
+
+def atomic_write(path: Path, content: bytes, mode: int) -> None:
+    """Write through a temporary file in the same directory, set the mode on it,
+    then move it into place.
+
+    The mode is applied before the content is reachable under its real name, so
+    a private key is never briefly world-readable on its way to 0600 — which a
+    `write_text()` followed by `chmod()` would have been. Same shape as
+    `mail_tls_manager.py:32`, which has written its keys this way all along.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(descriptor, "wb") as temporary_file:
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.chmod(temporary_name, mode)
+        os.replace(temporary_name, path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def get_certs_dir() -> Path:
     candidates = [
         Path.cwd() / "docker" / "traefik" / "certs",
@@ -77,7 +120,7 @@ def get_certs_dir() -> Path:
         if c.exists():
             return c
     target = Path.cwd() / "docker" / "traefik" / "certs"
-    target.mkdir(parents=True, exist_ok=True)
+    target.mkdir(parents=True, exist_ok=True, mode=CERTS_DIR_MODE)
     return target
 
 
@@ -160,14 +203,14 @@ def generate_self_signed(hostname: str, sans: list = None, days_valid: int = 90,
         cert_file = certs_dir / f"{clean_host}.crt"
         key_file = certs_dir / f"{clean_host}.key"
 
-    cert_file.write_text(cert_pem, encoding="utf-8")
-    key_file.write_text(key_pem, encoding="utf-8")
+    atomic_write(cert_file, cert_pem.encode("utf-8"), CERTIFICATE_MODE)
+    atomic_write(key_file, key_pem.encode("utf-8"), PRIVATE_KEY_MODE)
 
     # If domain_id was given, also write clean_host file as convenience
     if domain_id:
         try:
-            (certs_dir / f"{clean_host}.crt").write_text(cert_pem, encoding="utf-8")
-            (certs_dir / f"{clean_host}.key").write_text(key_pem, encoding="utf-8")
+            atomic_write(certs_dir / f"{clean_host}.crt", cert_pem.encode("utf-8"), CERTIFICATE_MODE)
+            atomic_write(certs_dir / f"{clean_host}.key", key_pem.encode("utf-8"), PRIVATE_KEY_MODE)
         except Exception:
             pass
 
@@ -336,8 +379,8 @@ def save_custom_certificate(domain_id: str, cert_pem: str, key_pem: str) -> dict
     key_file = certs_dir / f"domain-{domain_id}.key"
 
     try:
-        cert_file.write_text(cert_pem.strip(), encoding="utf-8")
-        key_file.write_text(key_pem.strip(), encoding="utf-8")
+        atomic_write(cert_file, cert_pem.strip().encode("utf-8"), CERTIFICATE_MODE)
+        atomic_write(key_file, key_pem.strip().encode("utf-8"), PRIVATE_KEY_MODE)
 
         parsed = parse_cert_pem(cert_pem)
         return {
@@ -350,10 +393,20 @@ def save_custom_certificate(domain_id: str, cert_pem: str, key_pem: str) -> dict
         return {"success": False, "error": f"Failed to save certificate files: {str(e)}"}
 
 
-def delete_custom_certificate(domain_id: str) -> dict:
+def delete_custom_certificate(domain_id: str, hostname: str = None) -> dict:
     certs_dir = get_certs_dir()
     cert_file = certs_dir / f"domain-{domain_id}.crt"
     key_file = certs_dir / f"domain-{domain_id}.key"
+
+    # Read the pair before unlinking it: the convenience copies are matched
+    # against this content, so a <host>.crt/.key that is not a copy of *this*
+    # certificate is left alone.
+    content = {}
+    for f in (cert_file, key_file):
+        try:
+            content[f] = f.read_bytes()
+        except OSError:
+            content[f] = None
 
     deleted = False
     for f in [cert_file, key_file]:
@@ -364,7 +417,31 @@ def delete_custom_certificate(domain_id: str) -> dict:
             except Exception:
                 pass
 
-    return {"success": True, "deleted": deleted}
+    # `generate_self_signed()` also writes <clean_host>.crt/.key as a convenience
+    # copy, and until now nothing ever removed them (#195). Two guards: the
+    # caller has to say which hostname it is deleting, because those names come
+    # from the hostname and a caller that predates this change sends none; and
+    # the copy has to match the file being deleted, because without a domain id
+    # `generate_self_signed()` writes those very names as its primary output and
+    # something else may own what is here.
+    copies_removed = []
+    if hostname:
+        clean_host = hostname.replace("*.", "wildcard.").replace(":", "_").replace("/", "_")
+        for source, copy in (
+            (cert_file, certs_dir / f"{clean_host}.crt"),
+            (key_file, certs_dir / f"{clean_host}.key"),
+        ):
+            if content[source] is None or not copy.exists():
+                continue
+            try:
+                if copy.read_bytes() != content[source]:
+                    continue
+                copy.unlink()
+                copies_removed.append(str(copy))
+            except Exception:
+                pass
+
+    return {"success": True, "deleted": deleted, "copiesRemoved": copies_removed}
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +489,10 @@ def main():
         )
         respond(res)
     elif cmd == "delete_cert":
-        res = delete_custom_certificate(domain_id=payload.get("domainId", ""))
+        res = delete_custom_certificate(
+            domain_id=payload.get("domainId", ""),
+            hostname=payload.get("hostname"),
+        )
         respond(res)
     elif cmd == "read_acme":
         res = read_acme_storage()
