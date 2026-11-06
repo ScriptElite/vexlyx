@@ -124,6 +124,14 @@ def get_certs_dir() -> Path:
     return target
 
 
+def convenience_copy_name(hostname: str) -> str:
+    """The stem `generate_self_signed()` uses for the <host>.crt/.key pair it
+    writes next to a domain's own pair, and the stem a deletion has to look for.
+    One rule for both, because a drift between them would leave a private key
+    behind on the host after its certificate was deleted (#195)."""
+    return hostname.replace("*.", "wildcard.").replace(":", "_").replace("/", "_")
+
+
 def get_acme_file() -> Path:
     candidates = [
         Path.cwd() / "docker" / "traefik" / "acme.json",
@@ -146,7 +154,7 @@ def generate_self_signed(hostname: str, sans: list = None, days_valid: int = 90,
 
     sans = sans or []
     certs_dir = get_certs_dir()
-    clean_host = hostname.replace("*.", "wildcard.").replace(":", "_").replace("/", "_")
+    clean_host = convenience_copy_name(hostname)
 
     key = rsa.generate_private_key(
         public_exponent=65537,
@@ -426,7 +434,7 @@ def delete_custom_certificate(domain_id: str, hostname: str = None) -> dict:
     # something else may own what is here.
     copies_removed = []
     if hostname:
-        clean_host = hostname.replace("*.", "wildcard.").replace(":", "_").replace("/", "_")
+        clean_host = convenience_copy_name(hostname)
         for source, copy in (
             (cert_file, certs_dir / f"{clean_host}.crt"),
             (key_file, certs_dir / f"{clean_host}.key"),
